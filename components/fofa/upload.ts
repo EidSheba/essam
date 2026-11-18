@@ -32,11 +32,24 @@ async function saveMedia(item: StoredMedia): Promise<void> {
     const db = await open()
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite')
-      tx.objectStore(STORE).add(item)
+      const req = tx.objectStore(STORE).add({ kind: item.kind, blob: item.blob })
+      req.onsuccess = () => { item.id = req.result as number }
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
   } catch { /* storage blocked or full: the item still shows until the page closes */ }
+}
+
+export async function deleteMedia(id: number): Promise<void> {
+  try {
+    const db = await open()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      tx.objectStore(STORE).delete(id)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch { /* ignore */ }
 }
 
 /** Downscale a picked image so it stays small. */

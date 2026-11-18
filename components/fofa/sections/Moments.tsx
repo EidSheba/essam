@@ -5,7 +5,7 @@ import styles from '../fofa.module.css'
 import { Reveal } from '../hooks'
 import { burstAt } from '../hearts'
 
-export interface ResolvedPhoto { url: string | null; caption: string; date?: string; video?: boolean }
+export interface ResolvedPhoto { url: string | null; caption: string; date?: string; video?: boolean; id?: number }
 
 export default function Moments({ photos }: { photos: ResolvedPhoto[] }) {
   const tableRef = useRef<HTMLDivElement>(null)

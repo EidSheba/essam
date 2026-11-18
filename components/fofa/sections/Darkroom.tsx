@@ -4,12 +4,13 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import styles from '../fofa.module.css'
 import { Reveal } from '../hooks'
 import { burstAt } from '../hearts'
-import { addMedia, loadMedia } from '../upload'
+import { addMedia, deleteMedia, loadMedia } from '../upload'
 import type { StoredMedia } from '../upload'
 import type { ResolvedPhoto } from './Moments'
 
 const SHOWN = 3
 
+const HIDDEN = 'fofa-hidden-photos'
 const THRESHOLD = 90
 // Resting poses (x, y, rotation) of the cards in the deck: the ones underneath peek out to the top-right and left.
 const POSES = [[0, 0, -1.5], [52, -26, 8], [-46, -14, -9]]
@@ -24,7 +25,9 @@ export default function Darkroom({ photos: base, initial }: { photos: ResolvedPh
   const [sound, setSound] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-  const photos = [...base, ...extra]
+  const [hidden, setHidden] = useState<string[]>([])
+  const [confirmDel, setConfirmDel] = useState(false)
+  const photos = [...base.filter((p) => !p.url || !hidden.includes(p.url)), ...extra]
   // The last card of the deck is always the "+" card.
   const n = photos.length + 1
   const [cur, setCur] = useState(0)
@@ -34,9 +37,10 @@ export default function Darkroom({ photos: base, initial }: { photos: ResolvedPh
   const start = useRef<{ x: number; id: number } | null>(null)
   const deck = useRef<HTMLDivElement>(null)
 
-  const toPhoto = (m: StoredMedia): ResolvedPhoto => ({ url: URL.createObjectURL(m.blob), caption: 'Us', video: m.kind === 'video' })
+  const toPhoto = (m: StoredMedia): ResolvedPhoto => ({ url: URL.createObjectURL(m.blob), caption: 'Us', video: m.kind === 'video', id: m.id })
 
   useEffect(() => {
+    try { setHidden(JSON.parse(localStorage.getItem(HIDDEN) || '[]')) } catch { /* storage unavailable */ }
     loadMedia().then((items) => { if (items.length) setExtra(items.map(toPhoto)) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -45,8 +49,36 @@ export default function Darkroom({ photos: base, initial }: { photos: ResolvedPh
     const added = await addMedia(files)
     if (fileRef.current) fileRef.current.value = ''
     if (!added.length) return
-    setCur(base.length + extra.length) // jump to the first newly added item
+    setCur(photos.length) // jump to the first newly added item
     setExtra((prev) => [...prev, ...added.map(toPhoto)])
+  }
+
+  useEffect(() => {
+    setConfirmDel(false)
+  }, [cur])
+
+  useEffect(() => {
+    if (!confirmDel) return
+    const t = window.setTimeout(() => setConfirmDel(false), 3000)
+    return () => window.clearTimeout(t)
+  }, [confirmDel])
+
+  /** Two taps: the first asks "Delete?", the second removes the photo shown on top. */
+  const remove = () => {
+    const photo = photos[cur % n]
+    if (!photo) return
+    if (!confirmDel) { setConfirmDel(true); return }
+    if (photo.id !== undefined) {
+      deleteMedia(photo.id)
+      setExtra((prev) => prev.filter((p) => p.id !== photo.id))
+    } else if (photo.url) {
+      const all = [...hidden, photo.url]
+      setHidden(all)
+      try { localStorage.setItem(HIDDEN, JSON.stringify(all)) } catch { /* keep hidden for this visit only */ }
+    }
+    setConfirmDel(false)
+    setSound(false)
+    setCur((c) => (c >= n - 1 ? 0 : c))
   }
 
   const next = (dir: 1 | -1 = 1) => {
@@ -128,6 +160,19 @@ export default function Darkroom({ photos: base, initial }: { photos: ResolvedPh
                     <span className={styles.ph} style={{ background: placeholderBg(i) }}>{initial}</span>
                   )}
                 </span>
+                {top && photo && (
+                  <button
+                    type="button"
+                    className={`${styles.delBtn} ${confirmDel ? styles.delSure : ''}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={remove}
+                    aria-label={confirmDel ? 'Tap again to delete this photo' : 'Delete this photo'}
+                  >
+                    {confirmDel ? 'Delete?' : (
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" /></svg>
+                    )}
+                  </button>
+                )}
               </div>
             )
           })}
