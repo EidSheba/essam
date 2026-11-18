@@ -4,11 +4,11 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import styles from '../fofa.module.css'
 import { Reveal } from '../hooks'
 import { burstAt } from '../hearts'
-import { filesToDataUrls } from '../upload'
+import { addMedia, loadMedia } from '../upload'
+import type { StoredMedia } from '../upload'
 import type { ResolvedPhoto } from './Moments'
 
 const SHOWN = 3
-const STORE = 'fofa-extra-photos'
 
 const THRESHOLD = 90
 // Resting poses (x, y, rotation) of the cards in the deck: the ones underneath peek out to the top-right and left.
@@ -21,7 +21,9 @@ function placeholderBg(i: number): string {
 /** A deck of photos: the top one is draggable left or right, the next ones peek out underneath. */
 export default function Darkroom({ photos: base, initial }: { photos: ResolvedPhoto[]; initial: string }) {
   const [extra, setExtra] = useState<ResolvedPhoto[]>([])
+  const [sound, setSound] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const photos = [...base, ...extra]
   // The last card of the deck is always the "+" card.
   const n = photos.length + 1
@@ -32,22 +34,19 @@ export default function Darkroom({ photos: base, initial }: { photos: ResolvedPh
   const start = useRef<{ x: number; id: number } | null>(null)
   const deck = useRef<HTMLDivElement>(null)
 
+  const toPhoto = (m: StoredMedia): ResolvedPhoto => ({ url: URL.createObjectURL(m.blob), caption: 'Us', video: m.kind === 'video' })
+
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORE) || '[]') as string[]
-      if (saved.length) setExtra(saved.map((url) => ({ url, caption: 'Us' })))
-    } catch { /* storage unavailable */ }
+    loadMedia().then((items) => { if (items.length) setExtra(items.map(toPhoto)) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const addFiles = async (files: FileList | null) => {
-    if (!files || !files.length) return
-    const urls = await filesToDataUrls(files)
-    if (!urls.length) return
-    const all = [...extra.map((p) => p.url as string), ...urls]
-    setExtra(all.map((url) => ({ url, caption: 'Us' })))
-    setCur(base.length + extra.length) // jump to the first newly added photo
-    try { localStorage.setItem(STORE, JSON.stringify(all)) } catch { /* too big or blocked: keep in memory only */ }
+    const added = await addMedia(files)
     if (fileRef.current) fileRef.current.value = ''
+    if (!added.length) return
+    setCur(base.length + extra.length) // jump to the first newly added item
+    setExtra((prev) => [...prev, ...added.map(toPhoto)])
   }
 
   const next = (dir: 1 | -1 = 1) => {
@@ -55,12 +54,13 @@ export default function Darkroom({ photos: base, initial }: { photos: ResolvedPh
     setLeaving(dir)
     window.setTimeout(() => {
       setCur((c) => (c + 1) % n)
+      setSound(false)
       setLeaving(0)
       setDx(0)
     }, 320)
     burstAt(deck.current, 4)
   }
-  const prev = () => { if (!leaving && n > 1) setCur((c) => (c - 1 + n) % n) }
+  const prev = () => { if (!leaving && n > 1) { setCur((c) => (c - 1 + n) % n); setSound(false) } }
 
   const down = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (leaving) return
@@ -77,7 +77,10 @@ export default function Darkroom({ photos: base, initial }: { photos: ResolvedPh
     setDragging(false)
     if (Math.abs(dx) > THRESHOLD) next(dx > 0 ? 1 : -1)
     else {
-      if (Math.abs(dx) < 6 && (cur % n) === n - 1) fileRef.current?.click()
+      if (Math.abs(dx) < 6) {
+        if ((cur % n) === n - 1) fileRef.current?.click()
+        else if (videoRef.current) { videoRef.current.muted = !videoRef.current.muted; setSound(!videoRef.current.muted) }
+      }
       setDx(0)
     }
   }
@@ -112,7 +115,12 @@ export default function Darkroom({ photos: base, initial }: { photos: ResolvedPh
               >
                 <span className={styles.pic}>
                   {!photo ? (
-                    <span className={styles.addCard}><span className={styles.addPlus}>+</span><span>Add your photos</span></span>
+                    <span className={styles.addCard}><span className={styles.addPlus}>+</span><span>Add photos or videos</span></span>
+                  ) : photo.url && photo.video ? (
+                    <>
+                      <video ref={top ? videoRef : undefined} src={top ? photo.url : `${photo.url}#t=0.1`} autoPlay={top} muted loop playsInline preload="metadata" />
+                      {top && <span className={styles.vidHint} aria-hidden="true">{sound ? 'sound on' : 'tap for sound'}</span>}
+                    </>
                   ) : photo.url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={photo.url} alt={photo.caption} draggable={false} />
@@ -124,7 +132,7 @@ export default function Darkroom({ photos: base, initial }: { photos: ResolvedPh
             )
           })}
         </div>
-        <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => addFiles(e.target.files)} />
+        <input ref={fileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => addFiles(e.target.files)} />
       </Reveal>
     </section>
   )
