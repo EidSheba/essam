@@ -1,12 +1,15 @@
 'use client'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import styles from '../fofa.module.css'
 import { Reveal } from '../hooks'
 import { burstAt } from '../hearts'
+import { filesToDataUrls } from '../upload'
 import type { ResolvedPhoto } from './Moments'
 
 const SHOWN = 3
+const STORE = 'fofa-extra-photos'
+
 const THRESHOLD = 90
 // Resting poses (x, y, rotation) of the cards in the deck: the ones underneath peek out to the top-right and left.
 const POSES = [[0, 0, -1.5], [52, -26, 8], [-46, -14, -9]]
@@ -16,14 +19,36 @@ function placeholderBg(i: number): string {
 }
 
 /** A deck of photos: the top one is draggable left or right, the next ones peek out underneath. */
-export default function Darkroom({ photos, initial }: { photos: ResolvedPhoto[]; initial: string }) {
-  const n = photos.length
+export default function Darkroom({ photos: base, initial }: { photos: ResolvedPhoto[]; initial: string }) {
+  const [extra, setExtra] = useState<ResolvedPhoto[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
+  const photos = [...base, ...extra]
+  // The last card of the deck is always the "+" card.
+  const n = photos.length + 1
   const [cur, setCur] = useState(0)
   const [dx, setDx] = useState(0)
   const [dragging, setDragging] = useState(false)
   const [leaving, setLeaving] = useState<0 | 1 | -1>(0)
   const start = useRef<{ x: number; id: number } | null>(null)
   const deck = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE) || '[]') as string[]
+      if (saved.length) setExtra(saved.map((url) => ({ url, caption: 'Us' })))
+    } catch { /* storage unavailable */ }
+  }, [])
+
+  const addFiles = async (files: FileList | null) => {
+    if (!files || !files.length) return
+    const urls = await filesToDataUrls(files)
+    if (!urls.length) return
+    const all = [...extra.map((p) => p.url as string), ...urls]
+    setExtra(all.map((url) => ({ url, caption: 'Us' })))
+    setCur(base.length + extra.length) // jump to the first newly added photo
+    try { localStorage.setItem(STORE, JSON.stringify(all)) } catch { /* too big or blocked: keep in memory only */ }
+    if (fileRef.current) fileRef.current.value = ''
+  }
 
   const next = (dir: 1 | -1 = 1) => {
     if (leaving || n < 2) return
@@ -51,7 +76,10 @@ export default function Darkroom({ photos, initial }: { photos: ResolvedPhoto[];
     start.current = null
     setDragging(false)
     if (Math.abs(dx) > THRESHOLD) next(dx > 0 ? 1 : -1)
-    else setDx(0)
+    else {
+      if (Math.abs(dx) < 6 && (cur % n) === n - 1) fileRef.current?.click()
+      setDx(0)
+    }
   }
 
   const slots = Array.from({ length: Math.min(SHOWN, n) }, (_, k) => k).reverse()
@@ -64,7 +92,7 @@ export default function Darkroom({ photos, initial }: { photos: ResolvedPhoto[];
         <div ref={deck} className={styles.deck}>
           {slots.map((k) => {
             const i = (cur + k) % n
-            const photo = photos[i]
+            const photo = i === n - 1 ? null : photos[i]
             const top = k === 0
             let style: CSSProperties
             if (top) {
@@ -83,7 +111,9 @@ export default function Darkroom({ photos, initial }: { photos: ResolvedPhoto[];
                 aria-hidden={!top}
               >
                 <span className={styles.pic}>
-                  {photo.url ? (
+                  {!photo ? (
+                    <span className={styles.addCard}><span className={styles.addPlus}>+</span><span>Add your photos</span></span>
+                  ) : photo.url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={photo.url} alt={photo.caption} draggable={false} />
                   ) : (
@@ -94,6 +124,7 @@ export default function Darkroom({ photos, initial }: { photos: ResolvedPhoto[];
             )
           })}
         </div>
+        <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => addFiles(e.target.files)} />
       </Reveal>
     </section>
   )

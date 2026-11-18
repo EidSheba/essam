@@ -4,6 +4,7 @@ import styles from './fofa.module.css'
 import Background from './Background'
 import Lock from './Lock'
 import Opening from './Opening'
+import Splash from './Splash'
 import Story from './Story'
 import type { ResolvedCouple } from './Story'
 
@@ -43,6 +44,7 @@ export default function FofaApp({ pin, lockPhoto, couple }: { pin: string; lockP
 
   return (
     <div className={styles.page}>
+      <Splash />
       <Background />
       <div className={styles.layer}>
         {state === 'locked' && <Lock pin={pin} photo={lockPhoto} initials={[couple.him[0], couple.her[0]]} onCorrect={() => setPreload(true)} onUnlocked={unlock} />}
